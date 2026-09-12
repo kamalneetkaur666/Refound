@@ -5,12 +5,22 @@ import defaultFirebaseConfig from '../../firebase-applet-config.json';
 
 // Support optional environment variables for self-hosted external deployments (e.g. Vercel)
 const env = (import.meta as any).env || {};
+
+// If user supplies their own project ID on Vercel, standard Firebase uses '(default)' database
+const isCustomProject = Boolean(
+  env.VITE_FIREBASE_PROJECT_ID && env.VITE_FIREBASE_PROJECT_ID !== defaultFirebaseConfig.projectId
+);
+
+const resolvedDatabaseId =
+  env.VITE_FIREBASE_DATABASE_ID ||
+  (isCustomProject ? '(default)' : defaultFirebaseConfig.firestoreDatabaseId || '(default)');
+
 const firebaseConfig = {
   projectId: env.VITE_FIREBASE_PROJECT_ID || defaultFirebaseConfig.projectId,
   appId: env.VITE_FIREBASE_APP_ID || defaultFirebaseConfig.appId,
   apiKey: env.VITE_FIREBASE_API_KEY || defaultFirebaseConfig.apiKey,
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || defaultFirebaseConfig.authDomain,
-  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || defaultFirebaseConfig.firestoreDatabaseId || '(default)',
+  firestoreDatabaseId: resolvedDatabaseId,
   storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || defaultFirebaseConfig.storageBucket,
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultFirebaseConfig.messagingSenderId,
 };
@@ -21,14 +31,20 @@ setLogLevel('error');
 const app = initializeApp(firebaseConfig);
 
 // initializeFirestore with long-polling enables reliable connections inside iframe sandboxes and proxy environments
-export const db = initializeFirestore(
-  app,
-  {
-    experimentalForceLongPolling: true,
-    ignoreUndefinedProperties: true,
-  },
-  firebaseConfig.firestoreDatabaseId
-);
+export const db =
+  resolvedDatabaseId && resolvedDatabaseId !== '(default)'
+    ? initializeFirestore(
+        app,
+        {
+          experimentalForceLongPolling: true,
+          ignoreUndefinedProperties: true,
+        },
+        resolvedDatabaseId
+      )
+    : initializeFirestore(app, {
+        experimentalForceLongPolling: true,
+        ignoreUndefinedProperties: true,
+      });
 
 export const auth = getAuth(app);
 

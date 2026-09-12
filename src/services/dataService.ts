@@ -70,23 +70,114 @@ class DataService {
 
   private async initFirestoreSync() {
     try {
-      // Attempt to load items from Firestore
       const itemsCol = collection(db, 'items');
-      const snap = await getDocs(itemsCol);
 
-      if (!snap.empty) {
-        const remoteItems: ItemReport[] = [];
-        snap.forEach((d) => remoteItems.push(d.data() as ItemReport));
-        if (remoteItems.length > 0) {
-          this.items = remoteItems;
-          setLocal(LOCAL_STORAGE_KEY_ITEMS, this.items);
-          this.notify();
+      // Real-time listener for items
+      onSnapshot(
+        itemsCol,
+        async (snap) => {
+          if (!snap.empty) {
+            const remoteItems: ItemReport[] = [];
+            snap.forEach((d) => {
+              const data = d.data() as ItemReport;
+              if (data && data.id) {
+                remoteItems.push(data);
+              }
+            });
+            if (remoteItems.length > 0) {
+              // Merge remote items with any local items
+              this.items = remoteItems.sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              );
+              setLocal(LOCAL_STORAGE_KEY_ITEMS, this.items);
+              this.notify();
+            }
+          } else {
+            // New empty Firebase project: seed initial sample items so the database is ready
+            try {
+              for (const sampleItem of SAMPLE_ITEMS) {
+                const docPayload = { ...sampleItem, privateDetails: null };
+                await setDoc(doc(db, 'items', sampleItem.id), docPayload);
+              }
+            } catch (seedErr) {
+              console.warn('Initial sample items seed note:', seedErr);
+            }
+          }
+          this.firestoreSynced = true;
+        },
+        (error) => {
+          console.warn('Firestore items real-time subscription note:', error.message);
+          this.firestoreSynced = false;
         }
-      }
+      );
 
-      this.firestoreSynced = true;
-    } catch {
-      // Hybrid offline state: app continues using cached/local store without interruption
+      // Real-time listener for matches
+      onSnapshot(
+        collection(db, 'matches'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteMatches: PotentialMatch[] = [];
+            snap.forEach((d) => {
+              const data = d.data() as PotentialMatch;
+              if (data && data.id) {
+                remoteMatches.push(data);
+              }
+            });
+            if (remoteMatches.length > 0) {
+              this.matches = remoteMatches;
+              setLocal(LOCAL_STORAGE_KEY_MATCHES, this.matches);
+              this.notify();
+            }
+          }
+        },
+        (err) => console.warn('Firestore matches subscription note:', err.message)
+      );
+
+      // Real-time listener for claims
+      onSnapshot(
+        collection(db, 'claims'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteClaims: Claim[] = [];
+            snap.forEach((d) => {
+              const data = d.data() as Claim;
+              if (data && data.id) {
+                remoteClaims.push(data);
+              }
+            });
+            if (remoteClaims.length > 0) {
+              this.claims = remoteClaims;
+              setLocal(LOCAL_STORAGE_KEY_CLAIMS, this.claims);
+              this.notify();
+            }
+          }
+        },
+        (err) => console.warn('Firestore claims subscription note:', err.message)
+      );
+
+      // Real-time listener for notifications
+      onSnapshot(
+        collection(db, 'notifications'),
+        (snap) => {
+          if (!snap.empty) {
+            const remoteNotifs: UserNotification[] = [];
+            snap.forEach((d) => {
+              const data = d.data() as UserNotification;
+              if (data && data.id) {
+                remoteNotifs.push(data);
+              }
+            });
+            if (remoteNotifs.length > 0) {
+              this.notifications = remoteNotifs;
+              setLocal(LOCAL_STORAGE_KEY_NOTIFS, this.notifications);
+              this.notify();
+            }
+          }
+        },
+        (err) => console.warn('Firestore notifications subscription note:', err.message)
+      );
+    } catch (e) {
+      console.warn('Firestore initialization note:', e);
       this.firestoreSynced = false;
     }
   }
