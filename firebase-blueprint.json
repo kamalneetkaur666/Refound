@@ -127,6 +127,10 @@
       "schema": "UserProfile",
       "description": "User profile information"
     },
+    "/users/{userId}/items/{itemId}": {
+      "schema": "ItemReport",
+      "description": "Lost and found items filed under a specific user account"
+    },
     "/items/{itemId}": {
       "schema": "ItemReport",
       "description": "Public lost or found items"

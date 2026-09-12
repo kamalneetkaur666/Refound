@@ -13,6 +13,7 @@ import {
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { UserProfile } from '../types';
+import { dataService } from '../services/dataService';
 
 export interface AuthErrorDetails {
   code: string;
@@ -120,7 +121,7 @@ function getInitialAuthState(): { user: UserProfile | null; isDemo: boolean } {
   } catch {
     // fallback
   }
-  return { user: DEMO_PROFILES.alex, isDemo: true };
+  return { user: null, isDemo: false };
 }
 
 // Safe timeout wrapper for Firestore reads so slow/offline networks never block authentication UI
@@ -241,6 +242,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser((prev) => (prev && prev.uid === fbUser.uid ? prev : baseProfile));
         localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(baseProfile));
 
+        // Automatically sync any items matching this user's email or device session
+        dataService.syncUserItemsOwnership(baseProfile).catch(() => {});
+
         // Background query to Firestore for any customized campus role or student ID
         try {
           const userDocRef = doc(db, 'users', fbUser.uid);
@@ -266,40 +270,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (savedActive) {
           try {
             const parsed = JSON.parse(savedActive);
-            // If the saved active was a Firebase account, but fbUser is null, clear it
-            if (parsed.authProvider === 'google') {
-              localStorage.removeItem(LOCAL_ACTIVE_USER_KEY);
-              const custom = localStorage.getItem('refound_custom_email_user');
-              if (custom) {
-                setUser(JSON.parse(custom));
+            if (parsed && parsed.uid) {
+              // If the saved active was a Google account, but fbUser is null, clear it
+              if (parsed.authProvider === 'google') {
+                localStorage.removeItem(LOCAL_ACTIVE_USER_KEY);
+                setUser(null);
                 setIsDemoMode(false);
               } else {
-                const demoKey = (localStorage.getItem('refound_demo_user') as 'alex' | 'sam' | 'security') || 'alex';
-                setUser(DEMO_PROFILES[demoKey] || DEMO_PROFILES.alex);
-                setIsDemoMode(true);
+                setUser(parsed);
+                setIsDemoMode(false);
+                dataService.syncUserItemsOwnership(parsed).catch(() => {});
               }
             } else {
-              setUser(parsed);
+              setUser(null);
               setIsDemoMode(false);
             }
           } catch {
-            setUser(DEMO_PROFILES.alex);
-            setIsDemoMode(true);
+            setUser(null);
+            setIsDemoMode(false);
           }
         } else {
           const custom = localStorage.getItem('refound_custom_email_user');
           if (custom) {
             try {
-              setUser(JSON.parse(custom));
-              setIsDemoMode(false);
+              const parsed = JSON.parse(custom);
+              if (parsed && parsed.uid) {
+                setUser(parsed);
+                setIsDemoMode(false);
+                dataService.syncUserItemsOwnership(parsed).catch(() => {});
+              } else {
+                setUser(null);
+                setIsDemoMode(false);
+              }
             } catch {
-              setUser(DEMO_PROFILES.alex);
-              setIsDemoMode(true);
+              setUser(null);
+              setIsDemoMode(false);
             }
           } else {
-            const demoKey = (localStorage.getItem('refound_demo_user') as 'alex' | 'sam' | 'security') || 'alex';
-            setUser(DEMO_PROFILES[demoKey] || DEMO_PROFILES.alex);
-            setIsDemoMode(true);
+            const demoKey = localStorage.getItem('refound_demo_user') as 'alex' | 'sam' | 'security' | null;
+            if (demoKey && DEMO_PROFILES[demoKey]) {
+              setUser(DEMO_PROFILES[demoKey]);
+              setIsDemoMode(true);
+            } else {
+              setUser(null);
+              setIsDemoMode(false);
+            }
           }
         }
       }
@@ -342,6 +357,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Set user IMMEDIATELY without waiting for Firestore
       setUser(activeProfile);
       localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(activeProfile));
+      dataService.syncUserItemsOwnership(activeProfile).catch(() => {});
 
       // Asynchronously sync Firestore in the background
       const userDocRef = doc(db, 'users', fbUser.uid);
@@ -601,6 +617,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(demoProfile));
     localStorage.setItem('refound_custom_email_user', JSON.stringify(demoProfile));
     localStorage.removeItem('refound_demo_user');
+    dataService.syncUserItemsOwnership(demoProfile).catch(() => {});
   };
 
   const signOutUser = async () => {

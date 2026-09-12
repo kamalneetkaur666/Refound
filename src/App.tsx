@@ -170,6 +170,7 @@ function AppContent() {
             onOpenMatchModal={handleOpenMatchModal}
             onOpenReportModal={handleOpenReportModal}
             onDataChanged={refreshData}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
           />
         )}
       </main>

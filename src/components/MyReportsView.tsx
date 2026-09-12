@@ -31,6 +31,7 @@ interface MyReportsViewProps {
   onOpenMatchModal: (match: PotentialMatch) => void;
   onOpenReportModal: (type?: 'lost' | 'found') => void;
   onDataChanged: () => void;
+  onOpenAuthModal?: () => void;
 }
 
 export const MyReportsView: React.FC<MyReportsViewProps> = ({
@@ -41,6 +42,7 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
   onOpenMatchModal,
   onOpenReportModal,
   onDataChanged,
+  onOpenAuthModal,
 }) => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'lost' | 'found' | 'matches' | 'received-claims' | 'sent-claims'>('lost');
@@ -49,22 +51,31 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
   const [rejectReasonInput, setRejectReasonInput] = useState('');
   const [isRejecting, setIsRejecting] = useState(false);
 
-  const myLostItems = items.filter((i) => i.ownerId === user?.uid && i.type === 'lost');
-  const myFoundItems = items.filter((i) => i.ownerId === user?.uid && i.type === 'found');
-  
-  // Detect reports submitted from this device/browser under previous demo/guest sessions
-  const deviceCreatedLostItems = items.filter(
-    (i) => i.type === 'lost' && i.ownerId !== user?.uid && dataService.isDeviceCreatedItem(i.id)
-  );
-  const deviceCreatedFoundItems = items.filter(
-    (i) => i.type === 'found' && i.ownerId !== user?.uid && dataService.isDeviceCreatedItem(i.id)
-  );
+  // Strictly scope user's items to their authenticated account (UID or verified email)
+  const userEmail = user?.email?.trim().toLowerCase();
+  const myLostItems = user
+    ? items.filter(
+        (i) =>
+          i.type === 'lost' &&
+          (i.ownerId === user.uid || (userEmail && i.reporterEmail?.trim().toLowerCase() === userEmail))
+      )
+    : [];
 
-  const myMatches = potentialMatches.filter(
-    (m) => m.lostItemOwnerId === user?.uid || m.foundItemOwnerId === user?.uid
-  );
-  const claimsReceived = claims.filter((c) => c.itemOwnerId === user?.uid);
-  const claimsSent = claims.filter((c) => c.claimantId === user?.uid);
+  const myFoundItems = user
+    ? items.filter(
+        (i) =>
+          i.type === 'found' &&
+          (i.ownerId === user.uid || (userEmail && i.reporterEmail?.trim().toLowerCase() === userEmail))
+      )
+    : [];
+
+  const myMatches = user
+    ? potentialMatches.filter(
+        (m) => m.lostItemOwnerId === user.uid || m.foundItemOwnerId === user.uid
+      )
+    : [];
+  const claimsReceived = user ? claims.filter((c) => c.itemOwnerId === user.uid) : [];
+  const claimsSent = user ? claims.filter((c) => c.claimantId === user.uid) : [];
 
   const handleTransferOwnership = async (item: ItemReport) => {
     if (!user) return;
@@ -108,6 +119,34 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
     }
   };
 
+  // If the user is not logged in, present a clean account sign-in gate
+  if (!user) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-20 text-center space-y-6">
+        <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto text-indigo-600 shadow-2xs">
+          <FolderHeart className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Account-Protected Campus Reports
+          </h1>
+          <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+            All lost and found items, verification claim reviews, and AI matches are securely isolated to your individual user account. Please sign in to access your reports.
+          </p>
+        </div>
+        <div className="pt-2">
+          <button
+            id="myreports-login-gate-btn"
+            onClick={onOpenAuthModal}
+            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm shadow-xs transition-colors cursor-pointer"
+          >
+            Sign In with Google or Email
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Header */}
@@ -139,6 +178,20 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
             Report Found
           </button>
         </div>
+      </div>
+
+      {/* Account Verification Indicator */}
+      <div className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs shadow-2xs">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+          <span className="text-slate-600">
+            Private reports for: <strong className="text-slate-900 font-semibold">{user.displayName}</strong>{' '}
+            <span className="text-slate-500">({user.email})</span>
+          </span>
+        </div>
+        <span className="text-[11px] font-mono text-slate-400">
+          Account ID: {user.uid}
+        </span>
       </div>
 
       {/* Tabs */}
@@ -207,37 +260,6 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
         {/* LOST ITEMS TAB */}
         {activeTab === 'lost' && (
           <div>
-            {/* Notice banner if reports were created on this browser under another session */}
-            {deviceCreatedLostItems.length > 0 && (
-              <div className="mb-5 p-4 rounded-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900">
-                      Found {deviceCreatedLostItems.length} lost report{deviceCreatedLostItems.length > 1 ? 's' : ''} submitted from this device in a previous session
-                    </h4>
-                    <p className="text-xs text-slate-600 mt-0.5">
-                      &ldquo;{deviceCreatedLostItems[0].title}&rdquo;{deviceCreatedLostItems.length > 1 ? ` and ${deviceCreatedLostItems.length - 1} other report` : ''} was uploaded here. Would you like to link it to your active account ({user?.displayName || user?.email || 'Active User'})?
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    id="link-lost-device-items-btn"
-                    onClick={async () => {
-                      for (const it of deviceCreatedLostItems) {
-                        await handleTransferOwnership(it);
-                      }
-                    }}
-                    className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
-                  >
-                    <UserCheck className="w-3.5 h-3.5" />
-                    Link to My Account
-                  </button>
-                </div>
-              </div>
-            )}
-
             {myLostItems.length > 0 ? (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {myLostItems.map((item) => (
@@ -269,13 +291,13 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
                     <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                       <button
                         onClick={() => onSelectItem(item)}
-                        className="px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        className="px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
                       >
                         View Full
                       </button>
                       <button
                         onClick={() => handleDeleteItem(item.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                         title="Delete report"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -284,63 +306,12 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
                   </div>
                 ))}
               </div>
-            ) : deviceCreatedLostItems.length > 0 ? (
-              <div className="space-y-4">
-                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Reports Submitted From This Device (Pending Link to Account):
-                </div>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {deviceCreatedLostItems.map((item) => (
-                    <div
-                      key={item.id}
-                      id={`device-lost-card-${item.id}`}
-                      className="bg-white rounded-2xl border border-amber-200/80 p-4 shadow-2xs space-y-3 flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
-                            On This Device
-                          </span>
-                          <span className="text-xs text-slate-400 capitalize">{item.status.replace('_', ' ')}</span>
-                        </div>
-                        <div className="aspect-16/9 rounded-xl overflow-hidden bg-slate-100 mb-2">
-                          {item.imageUrl && (
-                            <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
-                          )}
-                        </div>
-                        <h3 className="font-bold text-slate-900 text-sm">{item.title}</h3>
-                        <p className="text-xs text-slate-500 line-clamp-2 mt-1">{item.description}</p>
-                        <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          <span className="truncate">{item.location}</span>
-                        </div>
-                      </div>
-
-                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => handleTransferOwnership(item)}
-                          className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center gap-1"
-                        >
-                          <UserCheck className="w-3.5 h-3.5" />
-                          Link to My Account
-                        </button>
-                        <button
-                          onClick={() => onSelectItem(item)}
-                          className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                          View
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             ) : (
               <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
-                <p className="text-slate-500 text-sm">You haven&apos;t reported any lost items yet.</p>
+                <p className="text-slate-500 text-sm">You haven&apos;t reported any lost items under your account yet.</p>
                 <button
                   onClick={() => onOpenReportModal('lost')}
-                  className="mt-3 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl"
+                  className="mt-3 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl cursor-pointer"
                 >
                   Report Lost Item
                 </button>
@@ -352,37 +323,6 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
         {/* FOUND ITEMS TAB */}
         {activeTab === 'found' && (
           <div>
-            {/* Notice banner if found reports were created on this browser under another session */}
-            {deviceCreatedFoundItems.length > 0 && (
-              <div className="mb-5 p-4 rounded-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900">
-                      Found {deviceCreatedFoundItems.length} found report{deviceCreatedFoundItems.length > 1 ? 's' : ''} submitted from this device in a previous session
-                    </h4>
-                    <p className="text-xs text-slate-600 mt-0.5">
-                      &ldquo;{deviceCreatedFoundItems[0].title}&rdquo; was submitted here. Would you like to link it to your active account ({user?.displayName || user?.email || 'Active User'})?
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    id="link-found-device-items-btn"
-                    onClick={async () => {
-                      for (const it of deviceCreatedFoundItems) {
-                        await handleTransferOwnership(it);
-                      }
-                    }}
-                    className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
-                  >
-                    <UserCheck className="w-3.5 h-3.5" />
-                    Link to My Account
-                  </button>
-                </div>
-              </div>
-            )}
-
             {myFoundItems.length > 0 ? (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {myFoundItems.map((item) => (
@@ -414,13 +354,13 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
                     <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                       <button
                         onClick={() => onSelectItem(item)}
-                        className="px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        className="px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
                       >
                         View Full
                       </button>
                       <button
                         onClick={() => handleDeleteItem(item.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                         title="Delete report"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -429,63 +369,12 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
                   </div>
                 ))}
               </div>
-            ) : deviceCreatedFoundItems.length > 0 ? (
-              <div className="space-y-4">
-                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Reports Submitted From This Device (Pending Link to Account):
-                </div>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {deviceCreatedFoundItems.map((item) => (
-                    <div
-                      key={item.id}
-                      id={`device-found-card-${item.id}`}
-                      className="bg-white rounded-2xl border border-amber-200/80 p-4 shadow-2xs space-y-3 flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
-                            On This Device
-                          </span>
-                          <span className="text-xs text-slate-400 capitalize">{item.status.replace('_', ' ')}</span>
-                        </div>
-                        <div className="aspect-16/9 rounded-xl overflow-hidden bg-slate-100 mb-2">
-                          {item.imageUrl && (
-                            <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
-                          )}
-                        </div>
-                        <h3 className="font-bold text-slate-900 text-sm">{item.title}</h3>
-                        <p className="text-xs text-slate-500 line-clamp-2 mt-1">{item.description}</p>
-                        <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          <span className="truncate">{item.location}</span>
-                        </div>
-                      </div>
-
-                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => handleTransferOwnership(item)}
-                          className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center gap-1"
-                        >
-                          <UserCheck className="w-3.5 h-3.5" />
-                          Link to My Account
-                        </button>
-                        <button
-                          onClick={() => onSelectItem(item)}
-                          className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                          View
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             ) : (
               <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
-                <p className="text-slate-500 text-sm">You haven&apos;t reported any found items yet.</p>
+                <p className="text-slate-500 text-sm">You haven&apos;t reported any found items under your account yet.</p>
                 <button
                   onClick={() => onOpenReportModal('found')}
-                  className="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl"
+                  className="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl cursor-pointer"
                 >
                   Report Found Item
                 </button>

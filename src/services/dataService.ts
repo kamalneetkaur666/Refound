@@ -263,6 +263,7 @@ class DataService {
     const item = this.getItemById(itemId);
     if (!item) return;
 
+    const oldOwnerId = item.ownerId;
     const updates: Partial<ItemReport> = {
       ownerId: newOwnerId,
     };
@@ -270,6 +271,20 @@ class DataService {
     if (reporterEmail) updates.reporterEmail = reporterEmail;
 
     await this.updateItem(itemId, updates);
+
+    // Save into new user's items subcollection and remove from old if needed
+    try {
+      const updatedItem = this.getItemById(itemId);
+      if (updatedItem) {
+        const payload = cleanFirestorePayload({ ...updatedItem, privateDetails: null });
+        safeFirestoreWrite(setDoc(doc(db, 'users', newOwnerId, 'items', itemId), payload), 2500);
+        if (oldOwnerId && oldOwnerId !== newOwnerId) {
+          safeFirestoreWrite(deleteDoc(doc(db, 'users', oldOwnerId, 'items', itemId)), 2000);
+        }
+      }
+    } catch (e) {
+      console.warn('User subcollection transfer note:', e);
+    }
 
     // Also transfer ownerId in private details doc if present
     try {
@@ -281,6 +296,35 @@ class DataService {
     } catch (e) {
       console.warn('Private details transfer note:', e);
     }
+  }
+
+  // Automatically ensure that any item matching the user's email or created on this device is cleanly owned by their account
+  public async syncUserItemsOwnership(currentUser: { uid: string; displayName?: string; email?: string }): Promise<number> {
+    if (!currentUser || !currentUser.uid) return 0;
+    let updatedCount = 0;
+    const userEmail = currentUser.email?.trim().toLowerCase();
+
+    for (const item of this.items) {
+      const itemEmail = item.reporterEmail?.trim().toLowerCase();
+      const isMatchingEmail = userEmail && itemEmail && itemEmail === userEmail;
+
+      if (isMatchingEmail && item.ownerId !== currentUser.uid) {
+        item.ownerId = currentUser.uid;
+        if (currentUser.displayName) item.reporterName = currentUser.displayName;
+        if (currentUser.email) item.reporterEmail = currentUser.email;
+        updatedCount++;
+
+        const payload = cleanFirestorePayload({ ...item, privateDetails: null });
+        safeFirestoreWrite(setDoc(doc(db, 'items', item.id), payload), 3000);
+        safeFirestoreWrite(setDoc(doc(db, 'users', currentUser.uid, 'items', item.id), payload), 3000);
+      }
+    }
+
+    if (updatedCount > 0) {
+      setLocal(LOCAL_STORAGE_KEY_ITEMS, this.items);
+      this.notify();
+    }
+    return updatedCount;
   }
 
   public async createItem(itemData: Omit<ItemReport, 'id' | 'createdAt' | 'updatedAt'>, privateDetails?: string): Promise<ItemReport> {
@@ -307,7 +351,13 @@ class DataService {
     });
 
     try {
+      // 1. Write to public /items collection for search, browse, and AI matching
       await safeFirestoreWrite(setDoc(doc(db, 'items', id), docPayload), 3500);
+
+      // 2. Also write to specific account collection /users/{ownerId}/items/{id}
+      if (newItem.ownerId) {
+        await safeFirestoreWrite(setDoc(doc(db, 'users', newItem.ownerId, 'items', id), docPayload), 3000);
+      }
 
       if (privateDetails) {
         const privPayload = cleanFirestorePayload({
@@ -327,8 +377,10 @@ class DataService {
 
   public async updateItem(id: string, updates: Partial<ItemReport>): Promise<void> {
     const now = new Date().toISOString();
+    let currentOwnerId = '';
     this.items = this.items.map((it) => {
       if (it.id !== id) return it;
+      currentOwnerId = it.ownerId;
       const merged = { ...it, ...updates, updatedAt: now };
       if (updates.imageUrl === '' || updates.imageUrl === null) {
         delete (merged as any).imageUrl;
@@ -349,12 +401,17 @@ class DataService {
         delete firestoreUpdates.imageUrl;
       }
       safeFirestoreWrite(updateDoc(doc(db, 'items', id), firestoreUpdates));
+      if (currentOwnerId) {
+        safeFirestoreWrite(updateDoc(doc(db, 'users', currentOwnerId, 'items', id), firestoreUpdates));
+      }
     } catch (error) {
       console.warn('Firestore item update error:', error);
     }
   }
 
   public async deleteItem(id: string): Promise<void> {
+    const existing = this.getItemById(id);
+    const ownerId = existing?.ownerId;
     this.items = this.items.filter((it) => it.id !== id);
     // Also clean up matches & claims related
     this.matches = this.matches.filter((m) => m.lostItemId !== id && m.foundItemId !== id);
@@ -366,6 +423,9 @@ class DataService {
 
     try {
       safeFirestoreWrite(deleteDoc(doc(db, 'items', id)));
+      if (ownerId) {
+        safeFirestoreWrite(deleteDoc(doc(db, 'users', ownerId, 'items', id)));
+      }
     } catch (error) {
       console.warn('Firestore delete error:', error);
     }
