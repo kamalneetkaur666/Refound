@@ -1,0 +1,155 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile containing public student information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "studentId": { "type": "string", "maxLength": 50 },
+        "campusRole": { "type": "string", "maxLength": 50 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "createdAt"]
+    },
+    "ItemReport": {
+      "title": "ItemReport",
+      "description": "Public lost or found item report on campus",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "reporterName": { "type": "string", "maxLength": 100 },
+        "reporterEmail": { "type": "string", "maxLength": 150 },
+        "type": { "type": "string", "enum": ["lost", "found"] },
+        "title": { "type": "string", "maxLength": 120 },
+        "category": { "type": "string", "maxLength": 50 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "location": { "type": "string", "maxLength": 150 },
+        "date": { "type": "string", "maxLength": 50 },
+        "approximateTime": { "type": "string", "maxLength": 50 },
+        "imageUrl": { "type": "string", "maxLength": 500000 },
+        "turnInLocation": { "type": "string", "maxLength": 150 },
+        "status": { "type": "string", "enum": ["active", "potential_match", "claimed", "returned", "closed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "type", "title", "category", "description", "location", "date", "status", "createdAt"]
+    },
+    "ItemPrivateDetails": {
+      "title": "ItemPrivateDetails",
+      "description": "Private verification information known only to the original reporter",
+      "type": "object",
+      "properties": {
+        "itemId": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "privateDetails": { "type": "string", "maxLength": 2000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["itemId", "ownerId", "privateDetails"]
+    },
+    "PotentialMatch": {
+      "title": "PotentialMatch",
+      "description": "Smart AI-suggested match between a lost item and a found item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "lostItemId": { "type": "string", "maxLength": 128 },
+        "foundItemId": { "type": "string", "maxLength": 128 },
+        "lostItemTitle": { "type": "string", "maxLength": 120 },
+        "foundItemTitle": { "type": "string", "maxLength": 120 },
+        "lostItemOwnerId": { "type": "string", "maxLength": 128 },
+        "foundItemOwnerId": { "type": "string", "maxLength": 128 },
+        "confidenceScore": { "type": "number" },
+        "matchReasons": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["suggested", "verified", "dismissed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["lostItemId", "foundItemId", "confidenceScore", "matchReasons", "status", "createdAt"]
+    },
+    "Claim": {
+      "title": "Claim",
+      "description": "Verification claim submitted by a student to retrieve an item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "itemId": { "type": "string", "maxLength": 128 },
+        "itemTitle": { "type": "string", "maxLength": 120 },
+        "itemOwnerId": { "type": "string", "maxLength": 128 },
+        "claimantId": { "type": "string", "maxLength": 128 },
+        "claimantName": { "type": "string", "maxLength": 100 },
+        "claimantEmail": { "type": "string", "maxLength": 150 },
+        "claimantPhone": { "type": "string", "maxLength": 30 },
+        "identifyingAnswers": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "returned"] },
+        "rejectionReason": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["itemId", "itemOwnerId", "claimantId", "claimantName", "identifyingAnswers", "status", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification for matches, claim status updates, and reports",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 120 },
+        "message": { "type": "string", "maxLength": 500 },
+        "type": { "type": "string", "enum": ["match_found", "claim_received", "claim_updated", "status_changed"] },
+        "relatedItemId": { "type": "string", "maxLength": 128 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "type", "isRead", "createdAt"]
+    },
+    "FlagReport": {
+      "title": "FlagReport",
+      "description": "Flag for suspicious or inappropriate listings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "itemId": { "type": "string", "maxLength": 128 },
+        "reporterId": { "type": "string", "maxLength": 128 },
+        "reason": { "type": "string", "maxLength": 100 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["itemId", "reporterId", "reason", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile information"
+    },
+    "/items/{itemId}": {
+      "schema": "ItemReport",
+      "description": "Public lost or found items"
+    },
+    "/items/{itemId}/private/details": {
+      "schema": "ItemPrivateDetails",
+      "description": "Hidden verification details of an item"
+    },
+    "/matches/{matchId}": {
+      "schema": "PotentialMatch",
+      "description": "AI potential matches between reports"
+    },
+    "/claims/{claimId}": {
+      "schema": "Claim",
+      "description": "Verification claims on items"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notification alerts"
+    },
+    "/flags/{flagId}": {
+      "schema": "FlagReport",
+      "description": "Inappropriate or suspicious report flags"
+    }
+  }
+}

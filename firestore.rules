@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // Public Items (Lost & Found reports)
+    match /items/{itemId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+      );
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      // Private verification details subcollection - ONLY readable by the reporter
+      match /private/{documentId} {
+        allow read: if isSignedIn() && (
+          resource == null || resource.data.ownerId == request.auth.uid
+        );
+        allow write: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      }
+    }
+
+    // AI Potential Matches
+    match /matches/{matchId} {
+      allow read: if isSignedIn() && (
+        resource.data.lostItemOwnerId == request.auth.uid ||
+        resource.data.foundItemOwnerId == request.auth.uid
+      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        resource.data.lostItemOwnerId == request.auth.uid ||
+        resource.data.foundItemOwnerId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.lostItemOwnerId == request.auth.uid ||
+        resource.data.foundItemOwnerId == request.auth.uid
+      );
+    }
+
+    // Verification claims
+    match /claims/{claimId} {
+      allow read: if isSignedIn() && (
+        resource.data.itemOwnerId == request.auth.uid ||
+        resource.data.claimantId == request.auth.uid
+      );
+      allow create: if isSignedIn() && request.resource.data.claimantId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.itemOwnerId == request.auth.uid ||
+        resource.data.claimantId == request.auth.uid
+      );
+      allow delete: if isSignedIn() && resource.data.claimantId == request.auth.uid;
+    }
+
+    // User notifications
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Suspicious listing flags
+    match /flags/{flagId} {
+      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow read: if isSignedIn() && resource.data.reporterId == request.auth.uid;
+    }
+  }
+}
