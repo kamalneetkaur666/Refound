@@ -123,13 +123,44 @@ function getInitialAuthState(): { user: UserProfile | null; isDemo: boolean } {
   return { user: DEMO_PROFILES.alex, isDemo: true };
 }
 
+// Safe timeout wrapper for Firestore reads so slow/offline networks never block authentication UI
+async function safeGetDocWithTimeout(docRef: any, ms = 1200): Promise<any | null> {
+  try {
+    const fetchPromise = getDoc(docRef);
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), ms));
+    return await Promise.race([fetchPromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('Firestore getDoc note (proceeding with cached/auth profile):', err);
+    return null;
+  }
+}
+
+// Safe timeout wrapper for Firestore writes
+async function safeSetDocWithTimeout(docRef: any, data: any, ms = 1500): Promise<void> {
+  try {
+    const setPromise = setDoc(docRef, data, { merge: true });
+    const timeoutPromise = new Promise<void>((resolve) => setTimeout(() => resolve(), ms));
+    await Promise.race([setPromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('Firestore setDoc note (saved locally):', err);
+  }
+}
+
 export function formatAuthError(error: any): AuthErrorDetails {
   const code = error?.code || '';
   let message = error?.message || 'Authentication failed. Please check your credentials.';
   let isProviderDisabled = false;
 
   switch (code) {
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      message = 'Google sign-in popup was closed before completing. Please try again.';
+      break;
+    case 'auth/popup-blocked':
+      message = 'The Google sign-in window was blocked by your browser. Please allow popups for this site and retry.';
+      break;
     case 'auth/operation-not-allowed':
+    case 'auth/admin-restricted-operation':
       message = 'Email & password registration is handled through Campus Account mode.';
       isProviderDisabled = false;
       break;
@@ -140,7 +171,7 @@ export function formatAuthError(error: any): AuthErrorDetails {
       message = 'Incorrect password. Please verify and try again, or use "Forgot Password".';
       break;
     case 'auth/invalid-credential':
-      message = 'Invalid email or password. Please check your credentials and try again.';
+      message = 'Invalid email or password. Please verify your credentials or register a new campus account.';
       break;
     case 'auth/email-already-in-use':
       message = 'An account with this email address already exists. Please sign in instead.';
@@ -152,14 +183,14 @@ export function formatAuthError(error: any): AuthErrorDetails {
       message = 'Please enter a valid email address.';
       break;
     case 'auth/too-many-requests':
-      message = 'Too many failed login attempts. Access is temporarily restricted. Please try again later.';
+      message = 'Too many attempts. Access is temporarily restricted. Please wait a moment and try again.';
       break;
     case 'auth/network-request-failed':
-      message = 'Network connectivity error. Please check your connection.';
+      message = 'Network connectivity error. Please check your connection and retry.';
       break;
     case 'auth/unauthorized-domain': {
       const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'your domain';
-      message = `This domain (${currentHost}) is not authorized in Firebase Authentication. Add "${currentHost}" to "Authorized domains" in your Firebase Console under Authentication > Settings.`;
+      message = `This domain (${currentHost}) is not authorized in Firebase Authentication. In Firebase Console under Authentication > Settings > Authorized domains, add "${currentHost}", or use Campus Email sign-in below.`;
       break;
     }
     default:
@@ -185,48 +216,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsDemoMode(false);
         localStorage.removeItem('refound_demo_user');
         localStorage.removeItem('refound_custom_email_user');
+
+        const isPassword = fbUser.providerData?.[0]?.providerId === 'password';
+        const baseProfile: UserProfile = {
+          uid: fbUser.uid,
+          displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Campus Member',
+          email: fbUser.email || '',
+          campusRole: 'Student',
+          authProvider: isPassword ? 'password' : 'google',
+          avatarUrl: fbUser.photoURL || undefined,
+          createdAt: new Date().toISOString(),
+        };
+
+        // Immediately update state so UI renders the signed-in user instantly
+        setUser((prev) => (prev && prev.uid === fbUser.uid ? prev : baseProfile));
+        localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(baseProfile));
+
+        // Background query to Firestore for any customized campus role or student ID
         try {
           const userDocRef = doc(db, 'users', fbUser.uid);
-          const snap = await getDoc(userDocRef);
-          if (snap.exists()) {
+          const snap = await safeGetDocWithTimeout(userDocRef, 1200);
+          if (snap && snap.exists && snap.exists()) {
             const data = snap.data() as UserProfile;
             const updatedProfile: UserProfile = {
+              ...baseProfile,
               ...data,
-              authProvider: fbUser.providerData?.[0]?.providerId === 'password' ? 'password' : 'google',
+              authProvider: isPassword ? 'password' : 'google',
             };
             setUser(updatedProfile);
             localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(updatedProfile));
           } else {
-            const isPassword = fbUser.providerData?.[0]?.providerId === 'password';
-            const newProfile: UserProfile = {
-              uid: fbUser.uid,
-              displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Campus Member',
-              email: fbUser.email || '',
-              campusRole: 'Student',
-              authProvider: isPassword ? 'password' : 'google',
-              avatarUrl: fbUser.photoURL || undefined,
-              createdAt: new Date().toISOString(),
-            };
-            try {
-              await setDoc(userDocRef, newProfile);
-            } catch (err) {
-              console.warn('Could not write initial profile to Firestore:', err);
-            }
-            setUser(newProfile);
-            localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(newProfile));
+            safeSetDocWithTimeout(userDocRef, baseProfile, 1200).catch(() => {});
           }
         } catch (err) {
           console.warn('Firestore profile sync note:', err);
-          const fallbackProfile: UserProfile = {
-            uid: fbUser.uid,
-            displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Campus Member',
-            email: fbUser.email || '',
-            campusRole: 'Student',
-            authProvider: fbUser.providerData?.[0]?.providerId === 'password' ? 'password' : 'google',
-            createdAt: new Date().toISOString(),
-          };
-          setUser(fallbackProfile);
-          localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(fallbackProfile));
         }
       } else {
         // If not logged in via Firebase Auth, check local accounts
@@ -281,34 +304,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
       const fbUser = result.user;
+
       setIsDemoMode(false);
       localStorage.removeItem('refound_demo_user');
       localStorage.removeItem('refound_custom_email_user');
 
-      const userDocRef = doc(db, 'users', fbUser.uid);
-      const snap = await getDoc(userDocRef);
-      let activeProfile: UserProfile;
-      if (!snap.exists()) {
-        activeProfile = {
-          uid: fbUser.uid,
-          displayName: fbUser.displayName || 'Campus Member',
-          email: fbUser.email || '',
-          campusRole: 'Student',
-          authProvider: 'google',
-          avatarUrl: fbUser.photoURL || undefined,
-          createdAt: new Date().toISOString(),
-        };
-        await setDoc(userDocRef, activeProfile);
-      } else {
-        activeProfile = {
-          ...(snap.data() as UserProfile),
-          authProvider: 'google',
-        };
-      }
+      const activeProfile: UserProfile = {
+        uid: fbUser.uid,
+        displayName: fbUser.displayName || 'Campus Member',
+        email: fbUser.email || '',
+        campusRole: 'Student',
+        authProvider: 'google',
+        avatarUrl: fbUser.photoURL || undefined,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Set user IMMEDIATELY without waiting for Firestore
       setUser(activeProfile);
       localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(activeProfile));
+
+      // Asynchronously sync Firestore in the background
+      const userDocRef = doc(db, 'users', fbUser.uid);
+      safeGetDocWithTimeout(userDocRef, 1200).then((snap) => {
+        if (snap && snap.exists && snap.exists()) {
+          const enriched = { ...activeProfile, ...(snap.data() as UserProfile), authProvider: 'google' as const };
+          setUser(enriched);
+          localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(enriched));
+        } else {
+          safeSetDocWithTimeout(userDocRef, activeProfile, 1200).catch(() => {});
+        }
+      }).catch(() => {});
+
+      return activeProfile;
     } catch (error: any) {
       console.error('Google Sign-in failed:', error);
       throw error;
@@ -320,81 +350,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithEmail = async (email: string, pass: string) => {
     setLoading(true);
     const cleanEmail = email.trim().toLowerCase();
+    const stored = getStoredAccounts();
+    const localAccount = stored[cleanEmail];
+
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, pass);
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
+      const fbUser = cred.user;
       setIsDemoMode(false);
       localStorage.removeItem('refound_demo_user');
       localStorage.removeItem('refound_custom_email_user');
-      const userDocRef = doc(db, 'users', cred.user.uid);
-      const snap = await getDoc(userDocRef);
-      let activeUser: UserProfile;
-      if (snap.exists()) {
-        activeUser = {
-          ...(snap.data() as UserProfile),
-          authProvider: 'password',
-        };
-      } else {
-        activeUser = {
-          uid: cred.user.uid,
-          displayName: cred.user.displayName || email.split('@')[0],
-          email: cred.user.email || email,
-          campusRole: 'Student',
-          authProvider: 'password',
-          createdAt: new Date().toISOString(),
-        };
-      }
+
+      const activeUser: UserProfile = {
+        uid: fbUser.uid,
+        displayName: fbUser.displayName || localAccount?.displayName || email.split('@')[0],
+        email: fbUser.email || cleanEmail,
+        campusRole: localAccount?.campusRole || 'Student',
+        studentId: localAccount?.studentId || '',
+        authProvider: 'password',
+        createdAt: new Date().toISOString(),
+      };
+
       setUser(activeUser);
       localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(activeUser));
+
+      // Enrich from Firestore in background
+      const userDocRef = doc(db, 'users', fbUser.uid);
+      safeGetDocWithTimeout(userDocRef, 1200).then((snap) => {
+        if (snap && snap.exists && snap.exists()) {
+          const enriched = { ...activeUser, ...(snap.data() as UserProfile), authProvider: 'password' as const };
+          setUser(enriched);
+          localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(enriched));
+        }
+      }).catch(() => {});
+
+      return activeUser;
     } catch (error: any) {
-      // If Firebase Auth Email/Password provider isn't enabled in console or IAM permission error
-      if (
-        error?.code === 'auth/operation-not-allowed' ||
-        error?.message?.includes('operation-not-allowed') ||
-        error?.message?.includes('PERMISSION_DENIED')
-      ) {
-        const stored = getStoredAccounts();
-        const account = stored[cleanEmail];
-
-        if (account) {
-          if (account.passwordHash && account.passwordHash !== pass) {
-            throw {
-              code: 'auth/wrong-password',
-              message: 'Incorrect password. Please verify and try again.',
-            };
-          }
-          const activeUser: UserProfile = { ...account };
-          delete (activeUser as any).passwordHash;
-          setUser(activeUser);
-          setIsDemoMode(false);
-          localStorage.removeItem('refound_demo_user');
-          localStorage.setItem('refound_custom_email_user', JSON.stringify(activeUser));
-          localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(activeUser));
-          return;
+      // Check stored campus accounts if Firebase Auth threw error
+      if (localAccount) {
+        if (localAccount.passwordHash && localAccount.passwordHash !== pass) {
+          throw {
+            code: 'auth/wrong-password',
+            message: 'Incorrect password. Please verify and try again.',
+          };
         }
+        const activeUser: UserProfile = { ...localAccount };
+        delete (activeUser as any).passwordHash;
+        setUser(activeUser);
+        setIsDemoMode(false);
+        localStorage.removeItem('refound_demo_user');
+        localStorage.setItem('refound_custom_email_user', JSON.stringify(activeUser));
+        localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(activeUser));
+        return activeUser;
+      }
 
-        // Demo profile shortcuts if matching demo email
-        const demoKey = cleanEmail.includes('alex')
-          ? 'alex'
-          : cleanEmail.includes('sam') || cleanEmail.includes('chen')
-          ? 'sam'
-          : cleanEmail.includes('security')
-          ? 'security'
-          : null;
+      // Demo profile shortcuts if matching demo email
+      const demoKey = cleanEmail.includes('alex')
+        ? 'alex'
+        : cleanEmail.includes('sam') || cleanEmail.includes('chen')
+        ? 'sam'
+        : cleanEmail.includes('security')
+        ? 'security'
+        : null;
 
-        if (demoKey) {
-          const profile = DEMO_PROFILES[demoKey];
-          setUser(profile);
-          setIsDemoMode(false);
-          localStorage.removeItem('refound_demo_user');
-          localStorage.setItem('refound_custom_email_user', JSON.stringify(profile));
-          localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(profile));
-          return;
-        }
-
-        throw {
-          code: 'auth/user-not-found',
-          message: 'No registered campus account found for this email. Click "Create Account" tab above to register.',
-        };
+      if (demoKey) {
+        const profile = DEMO_PROFILES[demoKey];
+        setUser(profile);
+        setIsDemoMode(false);
+        localStorage.removeItem('refound_demo_user');
+        localStorage.setItem('refound_custom_email_user', JSON.stringify(profile));
+        localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(profile));
+        return profile;
       }
 
       console.error('Email sign in error:', error);
@@ -413,6 +438,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ) => {
     setLoading(true);
     const cleanEmail = email.trim();
+    const normKey = cleanEmail.toLowerCase();
+    const stored = getStoredAccounts();
+
+    if (stored[normKey]) {
+      setLoading(false);
+      throw {
+        code: 'auth/email-already-in-use',
+        message: 'An account with this email address already exists. Please sign in.',
+      };
+    }
+
     try {
       const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       await updateProfile(cred.user, { displayName });
@@ -430,29 +466,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: new Date().toISOString(),
       };
 
-      try {
-        await setDoc(doc(db, 'users', cred.user.uid), newProfile);
-      } catch (err) {
-        console.warn('Set doc error for user:', err);
-      }
-
       setUser(newProfile);
       localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(newProfile));
+
+      // Save to Firestore with timeout
+      safeSetDocWithTimeout(doc(db, 'users', cred.user.uid), newProfile, 1200).catch(() => {});
+
+      return newProfile;
     } catch (error: any) {
       if (
         error?.code === 'auth/operation-not-allowed' ||
+        error?.code === 'auth/admin-restricted-operation' ||
+        error?.code === 'auth/configuration-not-found' ||
+        error?.code === 'auth/unauthorized-domain' ||
+        error?.code === 'auth/network-request-failed' ||
         error?.message?.includes('operation-not-allowed') ||
         error?.message?.includes('PERMISSION_DENIED')
       ) {
-        const stored = getStoredAccounts();
-        const normKey = cleanEmail.toLowerCase();
-        if (stored[normKey]) {
-          throw {
-            code: 'auth/email-already-in-use',
-            message: 'An account with this email address already exists. Please sign in.',
-          };
-        }
-
         const customUid = `campus-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
         const localProfile: StoredAccount = {
           uid: customUid,
@@ -474,7 +504,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('refound_demo_user');
         localStorage.setItem('refound_custom_email_user', JSON.stringify(activeUser));
         localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(activeUser));
-        return;
+        return activeUser;
       }
 
       console.error('Sign up error:', error);

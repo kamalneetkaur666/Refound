@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Mail,
@@ -13,6 +13,7 @@ import {
   KeyRound,
   ArrowLeft,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { useAuth, formatAuthError, AuthErrorDetails } from '../context/AuthContext';
 
@@ -28,6 +29,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialMode = 'signin',
 }) => {
   const {
+    user,
+    isDemoMode,
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
@@ -45,43 +48,85 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [studentId, setStudentId] = useState('');
   const [errorDetails, setErrorDetails] = useState<AuthErrorDetails | null>(null);
   const [resetSent, setResetSent] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Reset modal state whenever it is opened
+  useEffect(() => {
+    if (isOpen) {
+      setEmailLoading(false);
+      setGoogleLoading(false);
+      setErrorDetails(null);
+      setResetSent(false);
+      if (initialMode) {
+        setMode(initialMode);
+      }
+    }
+  }, [isOpen, initialMode]);
+
+  // Automatically dismiss the modal as soon as a non-demo user is authenticated
+  useEffect(() => {
+    if (isOpen && user && !isDemoMode) {
+      setEmailLoading(false);
+      setGoogleLoading(false);
+      onClose();
+    }
+  }, [user, isDemoMode, isOpen, onClose]);
 
   if (!isOpen) return null;
 
   const handleEmailAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorDetails(null);
-    setLoading(true);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setErrorDetails({
+        code: 'custom/empty-email',
+        message: 'Please enter your campus email address.',
+      });
+      return;
+    }
+
+    if (!password) {
+      setErrorDetails({
+        code: 'custom/empty-password',
+        message: 'Please enter your password.',
+      });
+      return;
+    }
+
+    if (mode === 'signup') {
+      if (!name.trim()) {
+        setErrorDetails({
+          code: 'custom/missing-name',
+          message: 'Please enter your full name.',
+        });
+        return;
+      }
+      if (password.length < 6) {
+        setErrorDetails({
+          code: 'auth/weak-password',
+          message: 'Password must be at least 6 characters.',
+        });
+        return;
+      }
+    }
+
+    setEmailLoading(true);
 
     try {
       if (mode === 'signup') {
-        if (!name.trim()) {
-          setErrorDetails({
-            code: 'custom/missing-name',
-            message: 'Please enter your full name.',
-          });
-          setLoading(false);
-          return;
-        }
-        if (password.length < 6) {
-          setErrorDetails({
-            code: 'auth/weak-password',
-            message: 'Password must be at least 6 characters.',
-          });
-          setLoading(false);
-          return;
-        }
-        await signUpWithEmail(email.trim(), password, name.trim(), role, studentId.trim());
+        await signUpWithEmail(trimmedEmail, password, name.trim(), role, studentId.trim());
       } else if (mode === 'signin') {
-        await signInWithEmail(email.trim(), password);
+        await signInWithEmail(trimmedEmail, password);
       }
+      setEmailLoading(false);
       onClose();
     } catch (err: any) {
       const formatted = formatAuthError(err);
       setErrorDetails(formatted);
-    } finally {
-      setLoading(false);
+      setEmailLoading(false);
     }
   };
 
@@ -96,27 +141,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     setErrorDetails(null);
-    setLoading(true);
+    setEmailLoading(true);
     try {
       await resetPassword(email.trim());
       setResetSent(true);
     } catch (err: any) {
       setErrorDetails(formatAuthError(err));
     } finally {
-      setLoading(false);
+      setEmailLoading(false);
     }
   };
 
   const handleGoogleSignIn = async () => {
     setErrorDetails(null);
-    setLoading(true);
+    setGoogleLoading(true);
     try {
       await signInWithGoogle();
+      setGoogleLoading(false);
       onClose();
     } catch (err: any) {
       setErrorDetails(formatAuthError(err));
-    } finally {
-      setLoading(false);
+      setGoogleLoading(false);
     }
   };
 
@@ -281,11 +326,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </button>
                     <button
                       type="submit"
-                      disabled={loading}
-                      className="flex-1 py-2 px-4 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                      disabled={emailLoading}
+                      className="flex-1 py-2 px-4 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
                     >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      {loading ? 'Sending...' : 'Send Password Reset Link'}
+                      {emailLoading ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                          <span>Sending...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-3.5 h-3.5" />
+                          <span>Send Password Reset Link</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>
@@ -419,11 +473,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="submit"
                 id="auth-submit-btn"
-                disabled={loading}
-                className="w-full py-2.5 px-4 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-xs transition-colors mt-2 flex items-center justify-center gap-2"
+                disabled={emailLoading || googleLoading}
+                className="w-full py-2.5 px-4 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 rounded-xl shadow-xs transition-colors mt-2 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
               >
-                {loading ? (
-                  <span>Processing...</span>
+                {emailLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>{mode === 'signup' ? 'Creating Account...' : 'Signing In...'}</span>
+                  </>
                 ) : mode === 'signup' ? (
                   <span>Create Account</span>
                 ) : (
@@ -447,28 +504,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 type="button"
                 id="google-signin-btn"
                 onClick={handleGoogleSignIn}
-                disabled={loading}
-                className="w-full py-2 px-4 border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2.5 shadow-2xs"
+                disabled={googleLoading || emailLoading}
+                className="w-full py-2.5 px-4 border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 text-slate-700 text-xs sm:text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2.5 shadow-2xs cursor-pointer disabled:cursor-not-allowed"
               >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.94 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                  />
-                </svg>
-                <span>Continue with Google</span>
+                {googleLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0 text-indigo-600" />
+                    <span>Connecting with Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.94 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                      />
+                    </svg>
+                    <span>Continue with Google</span>
+                  </>
+                )}
               </button>
 
               {/* Quick Demo Personas Box */}
