@@ -157,6 +157,11 @@ export function formatAuthError(error: any): AuthErrorDetails {
     case 'auth/network-request-failed':
       message = 'Network connectivity error. Please check your connection.';
       break;
+    case 'auth/unauthorized-domain': {
+      const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'your domain';
+      message = `This domain (${currentHost}) is not authorized in Firebase Authentication. Add "${currentHost}" to "Authorized domains" in your Firebase Console under Authentication > Settings.`;
+      break;
+    }
     default:
       break;
   }

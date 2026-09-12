@@ -206,7 +206,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-2">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
-                <span className="leading-relaxed">{errorDetails.message}</span>
+                <div className="space-y-1.5 leading-relaxed">
+                  <div>{errorDetails.message}</div>
+                  {errorDetails.code === 'auth/unauthorized-domain' && (
+                    <div className="pt-1 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('signin');
+                          setErrorDetails(null);
+                        }}
+                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors text-[11px]"
+                      >
+                        Sign in with Campus Email instead
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
