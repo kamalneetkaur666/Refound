@@ -21,6 +21,7 @@ const LOCAL_STORAGE_KEY_MATCHES = 'refound_matches_store_v1';
 const LOCAL_STORAGE_KEY_CLAIMS = 'refound_claims_store_v1';
 const LOCAL_STORAGE_KEY_NOTIFS = 'refound_notifs_store_v1';
 const LOCAL_STORAGE_KEY_FLAGS = 'refound_flags_store_v1';
+const LOCAL_STORAGE_KEY_DEVICE_ITEMS = 'refound_device_created_items_v1';
 
 // Initial local cache setup
 function getLocal<T>(key: string, fallback: T[]): T[] {
@@ -44,8 +45,19 @@ function setLocal<T>(key: string, data: T[]) {
   }
 }
 
+// Clean any undefined or invalid fields so Firestore never rejects payloads
+export function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Partial<T> {
+  const cleaned: Record<string, any> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined && val !== null) {
+      cleaned[key] = val;
+    }
+  }
+  return cleaned as Partial<T>;
+}
+
 // Resilient non-blocking write helper so slow/offline networks or unconfigured Firebase never hang the UI
-function safeFirestoreWrite<T>(promise: Promise<T>, timeoutMs = 1200): Promise<void> {
+function safeFirestoreWrite<T>(promise: Promise<T>, timeoutMs = 3500): Promise<void> {
   const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
   return Promise.race([promise.then(() => {}), timeoutPromise]).catch((err) => {
     console.warn('Firestore background write warning (local state preserved):', err?.message || err);
@@ -93,9 +105,25 @@ class DataService {
               }
             });
             if (remoteItems.length > 0) {
-              // Merge remote items with any local items
-              this.items = remoteItems.sort(
-                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              // Non-destructive merge: preserve any items created locally on this device
+              const remoteMap = new Map<string, ItemReport>();
+              for (const item of remoteItems) {
+                remoteMap.set(item.id, item);
+              }
+              // For any locally saved item, if not yet in remote, keep it and push it to Firestore
+              for (const localItem of this.items) {
+                if (!remoteMap.has(localItem.id)) {
+                  remoteMap.set(localItem.id, localItem);
+                  // Push missing item to Firestore
+                  const docPayload = cleanFirestorePayload({
+                    ...localItem,
+                    privateDetails: null,
+                  });
+                  safeFirestoreWrite(setDoc(doc(db, 'items', localItem.id), docPayload), 4000);
+                }
+              }
+              this.items = Array.from(remoteMap.values()).sort(
+                (a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime()
               );
               setLocal(LOCAL_STORAGE_KEY_ITEMS, this.items);
               this.notify();
@@ -104,7 +132,7 @@ class DataService {
             // New empty Firebase project: seed initial sample items so the database is ready
             try {
               for (const sampleItem of SAMPLE_ITEMS) {
-                const docPayload = { ...sampleItem, privateDetails: null };
+                const docPayload = cleanFirestorePayload({ ...sampleItem, privateDetails: null });
                 await setDoc(doc(db, 'items', sampleItem.id), docPayload);
               }
             } catch (seedErr) {
@@ -199,6 +227,62 @@ class DataService {
     return this.items.find((i) => i.id === id);
   }
 
+  // Device-level report tracking so users can always find their submitted reports even after switching accounts
+  public isDeviceCreatedItem(itemId: string): boolean {
+    const ids = this.getDeviceCreatedItemIds();
+    return ids.includes(itemId);
+  }
+
+  public getDeviceCreatedItemIds(): string[] {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY_DEVICE_ITEMS);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  public markDeviceCreatedItem(itemId: string): void {
+    try {
+      const ids = this.getDeviceCreatedItemIds();
+      if (!ids.includes(itemId)) {
+        ids.push(itemId);
+        localStorage.setItem(LOCAL_STORAGE_KEY_DEVICE_ITEMS, JSON.stringify(ids));
+      }
+    } catch (err) {
+      console.warn('Failed to mark device item:', err);
+    }
+  }
+
+  public async transferItemOwnership(
+    itemId: string,
+    newOwnerId: string,
+    reporterName?: string,
+    reporterEmail?: string
+  ): Promise<void> {
+    const item = this.getItemById(itemId);
+    if (!item) return;
+
+    const updates: Partial<ItemReport> = {
+      ownerId: newOwnerId,
+    };
+    if (reporterName) updates.reporterName = reporterName;
+    if (reporterEmail) updates.reporterEmail = reporterEmail;
+
+    await this.updateItem(itemId, updates);
+
+    // Also transfer ownerId in private details doc if present
+    try {
+      const privateRef = doc(db, 'items', itemId, 'private', 'details');
+      const snap = await getDoc(privateRef);
+      if (snap.exists()) {
+        await updateDoc(privateRef, { ownerId: newOwnerId });
+      }
+    } catch (e) {
+      console.warn('Private details transfer note:', e);
+    }
+  }
+
   public async createItem(itemData: Omit<ItemReport, 'id' | 'createdAt' | 'updatedAt'>, privateDetails?: string): Promise<ItemReport> {
     const id = 'item-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
     const now = new Date().toISOString();
@@ -210,30 +294,29 @@ class DataService {
       privateDetails,
     };
 
-    this.items = [newItem, ...this.items];
+    // Prepend to local items list and immediately record device ownership
+    this.items = [newItem, ...this.items.filter((i) => i.id !== id)];
+    this.markDeviceCreatedItem(id);
     setLocal(LOCAL_STORAGE_KEY_ITEMS, this.items);
     this.notify();
 
-    // Persist to Firestore in background without blocking UI
+    // Prepare clean payload for public item document
+    const docPayload = cleanFirestorePayload({
+      ...newItem,
+      privateDetails: null, // do not store in public doc
+    });
+
     try {
-      const docPayload: any = {
-        ...newItem,
-        privateDetails: null, // do not store in public doc
-      };
-      if (!docPayload.imageUrl) {
-        delete docPayload.imageUrl;
-      }
-      safeFirestoreWrite(setDoc(doc(db, 'items', id), docPayload));
+      await safeFirestoreWrite(setDoc(doc(db, 'items', id), docPayload), 3500);
 
       if (privateDetails) {
-        safeFirestoreWrite(
-          setDoc(doc(db, 'items', id, 'private', 'details'), {
-            itemId: id,
-            ownerId: newItem.ownerId,
-            privateDetails,
-            updatedAt: now,
-          })
-        );
+        const privPayload = cleanFirestorePayload({
+          itemId: id,
+          ownerId: newItem.ownerId,
+          privateDetails,
+          updatedAt: now,
+        });
+        await safeFirestoreWrite(setDoc(doc(db, 'items', id, 'private', 'details'), privPayload), 3000);
       }
     } catch (error) {
       console.warn('Firestore item write note:', error);

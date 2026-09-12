@@ -51,11 +51,31 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
 
   const myLostItems = items.filter((i) => i.ownerId === user?.uid && i.type === 'lost');
   const myFoundItems = items.filter((i) => i.ownerId === user?.uid && i.type === 'found');
+  
+  // Detect reports submitted from this device/browser under previous demo/guest sessions
+  const deviceCreatedLostItems = items.filter(
+    (i) => i.type === 'lost' && i.ownerId !== user?.uid && dataService.isDeviceCreatedItem(i.id)
+  );
+  const deviceCreatedFoundItems = items.filter(
+    (i) => i.type === 'found' && i.ownerId !== user?.uid && dataService.isDeviceCreatedItem(i.id)
+  );
+
   const myMatches = potentialMatches.filter(
     (m) => m.lostItemOwnerId === user?.uid || m.foundItemOwnerId === user?.uid
   );
   const claimsReceived = claims.filter((c) => c.itemOwnerId === user?.uid);
   const claimsSent = claims.filter((c) => c.claimantId === user?.uid);
+
+  const handleTransferOwnership = async (item: ItemReport) => {
+    if (!user) return;
+    await dataService.transferItemOwnership(
+      item.id,
+      user.uid,
+      user.displayName || user.email?.split('@')[0],
+      user.email
+    );
+    onDataChanged();
+  };
 
   const handleOpenClaimReview = async (claim: Claim) => {
     setSelectedClaimForReview(claim);
@@ -187,6 +207,37 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
         {/* LOST ITEMS TAB */}
         {activeTab === 'lost' && (
           <div>
+            {/* Notice banner if reports were created on this browser under another session */}
+            {deviceCreatedLostItems.length > 0 && (
+              <div className="mb-5 p-4 rounded-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      Found {deviceCreatedLostItems.length} lost report{deviceCreatedLostItems.length > 1 ? 's' : ''} submitted from this device in a previous session
+                    </h4>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      &ldquo;{deviceCreatedLostItems[0].title}&rdquo;{deviceCreatedLostItems.length > 1 ? ` and ${deviceCreatedLostItems.length - 1} other report` : ''} was uploaded here. Would you like to link it to your active account ({user?.displayName || user?.email || 'Active User'})?
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    id="link-lost-device-items-btn"
+                    onClick={async () => {
+                      for (const it of deviceCreatedLostItems) {
+                        await handleTransferOwnership(it);
+                      }
+                    }}
+                    className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    Link to My Account
+                  </button>
+                </div>
+              </div>
+            )}
+
             {myLostItems.length > 0 ? (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {myLostItems.map((item) => (
@@ -233,6 +284,57 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
                   </div>
                 ))}
               </div>
+            ) : deviceCreatedLostItems.length > 0 ? (
+              <div className="space-y-4">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Reports Submitted From This Device (Pending Link to Account):
+                </div>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {deviceCreatedLostItems.map((item) => (
+                    <div
+                      key={item.id}
+                      id={`device-lost-card-${item.id}`}
+                      className="bg-white rounded-2xl border border-amber-200/80 p-4 shadow-2xs space-y-3 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
+                            On This Device
+                          </span>
+                          <span className="text-xs text-slate-400 capitalize">{item.status.replace('_', ' ')}</span>
+                        </div>
+                        <div className="aspect-16/9 rounded-xl overflow-hidden bg-slate-100 mb-2">
+                          {item.imageUrl && (
+                            <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                        <h3 className="font-bold text-slate-900 text-sm">{item.title}</h3>
+                        <p className="text-xs text-slate-500 line-clamp-2 mt-1">{item.description}</p>
+                        <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          <span className="truncate">{item.location}</span>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => handleTransferOwnership(item)}
+                          className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          Link to My Account
+                        </button>
+                        <button
+                          onClick={() => onSelectItem(item)}
+                          className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
               <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
                 <p className="text-slate-500 text-sm">You haven&apos;t reported any lost items yet.</p>
@@ -250,6 +352,37 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
         {/* FOUND ITEMS TAB */}
         {activeTab === 'found' && (
           <div>
+            {/* Notice banner if found reports were created on this browser under another session */}
+            {deviceCreatedFoundItems.length > 0 && (
+              <div className="mb-5 p-4 rounded-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      Found {deviceCreatedFoundItems.length} found report{deviceCreatedFoundItems.length > 1 ? 's' : ''} submitted from this device in a previous session
+                    </h4>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      &ldquo;{deviceCreatedFoundItems[0].title}&rdquo; was submitted here. Would you like to link it to your active account ({user?.displayName || user?.email || 'Active User'})?
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    id="link-found-device-items-btn"
+                    onClick={async () => {
+                      for (const it of deviceCreatedFoundItems) {
+                        await handleTransferOwnership(it);
+                      }
+                    }}
+                    className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    Link to My Account
+                  </button>
+                </div>
+              </div>
+            )}
+
             {myFoundItems.length > 0 ? (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {myFoundItems.map((item) => (
@@ -295,6 +428,57 @@ export const MyReportsView: React.FC<MyReportsViewProps> = ({
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : deviceCreatedFoundItems.length > 0 ? (
+              <div className="space-y-4">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Reports Submitted From This Device (Pending Link to Account):
+                </div>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {deviceCreatedFoundItems.map((item) => (
+                    <div
+                      key={item.id}
+                      id={`device-found-card-${item.id}`}
+                      className="bg-white rounded-2xl border border-amber-200/80 p-4 shadow-2xs space-y-3 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
+                            On This Device
+                          </span>
+                          <span className="text-xs text-slate-400 capitalize">{item.status.replace('_', ' ')}</span>
+                        </div>
+                        <div className="aspect-16/9 rounded-xl overflow-hidden bg-slate-100 mb-2">
+                          {item.imageUrl && (
+                            <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+                          )}
+                        </div>
+                        <h3 className="font-bold text-slate-900 text-sm">{item.title}</h3>
+                        <p className="text-xs text-slate-500 line-clamp-2 mt-1">{item.description}</p>
+                        <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          <span className="truncate">{item.location}</span>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => handleTransferOwnership(item)}
+                          className="px-3 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors flex items-center gap-1"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          Link to My Account
+                        </button>
+                        <button
+                          onClick={() => onSelectItem(item)}
+                          className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">

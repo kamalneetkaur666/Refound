@@ -93,8 +93,8 @@ export const BrowseView: React.FC<BrowseViewProps> = ({
         return true;
       })
       .sort((a, b) => {
-        const timeA = new Date(a.date).getTime();
-        const timeB = new Date(b.date).getTime();
+        const timeA = new Date(a.createdAt || a.date).getTime();
+        const timeB = new Date(b.createdAt || b.date).getTime();
         return sortBy === 'newest' ? timeB - timeA : timeA - timeB;
       });
   }, [items, typeFilter, categoryFilter, locationFilter, statusFilter, dateFilter, searchQuery, sortBy]);

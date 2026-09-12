@@ -99,10 +99,45 @@ export const ReportItemWizard: React.FC<ReportItemWizardProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Convert file to base64 data URL
+    // Convert file to base64 data URL with automatic canvas compression
+    // Ensures photos taken on high-res phone cameras fit seamlessly in Firestore & LocalStorage
     const reader = new FileReader();
-    reader.onload = () => {
-      setImageUrl(reader.result as string);
+    reader.onload = (event) => {
+      const rawResult = event.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const maxDim = 800;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            const compressed = canvas.toDataURL('image/jpeg', 0.75);
+            setImageUrl(compressed);
+            return;
+          }
+        } catch (e) {
+          console.warn('Canvas compression note:', e);
+        }
+        setImageUrl(rawResult);
+      };
+      img.onerror = () => {
+        setImageUrl(rawResult);
+      };
+      img.src = rawResult;
     };
     reader.readAsDataURL(file);
   };
