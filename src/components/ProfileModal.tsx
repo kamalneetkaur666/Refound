@@ -17,12 +17,14 @@ interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenAuthModal: () => void;
+  onOpenFirebaseConfig?: () => void;
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
   isOpen,
   onClose,
   onOpenAuthModal,
+  onOpenFirebaseConfig,
 }) => {
   const { user, isDemoMode, switchDemoUser, signOutUser, updateUserProfileData } = useAuth();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
@@ -238,19 +240,33 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           )}
 
           {/* Buttons */}
-          <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-            <button
-              type="button"
-              id="profile-sign-out-btn"
-              onClick={async () => {
-                await signOutUser();
-                onClose();
-              }}
-              className="px-3.5 py-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl font-semibold flex items-center gap-1.5 transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
-              Sign Out
-            </button>
+          <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                id="profile-sign-out-btn"
+                onClick={async () => {
+                  await signOutUser();
+                  onClose();
+                }}
+                className="px-3 py-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl font-semibold flex items-center gap-1.5 transition-colors text-xs sm:text-sm cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
+              </button>
+              {onOpenFirebaseConfig && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenFirebaseConfig();
+                  }}
+                  className="px-3 py-2 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-xl font-semibold transition-colors text-xs cursor-pointer"
+                >
+                  Firebase Settings
+                </button>
+              )}
+            </div>
 
             <div className="flex gap-2">
               <button

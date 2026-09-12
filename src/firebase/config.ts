@@ -3,27 +3,71 @@ import { getAuth } from 'firebase/auth';
 import { initializeFirestore, setLogLevel, doc, getDocFromServer } from 'firebase/firestore';
 import defaultFirebaseConfig from '../../firebase-applet-config.json';
 
-// Support optional environment variables for self-hosted external deployments (e.g. Vercel)
+// Support optional environment variables or browser-stored custom Firebase config (e.g. when connecting a new Firebase project on Vercel)
 const env = (import.meta as any).env || {};
 
-// If user supplies their own project ID on Vercel, standard Firebase uses '(default)' database
+function getStoredCustomConfig(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem('refound_custom_firebase_config');
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+const customStored = getStoredCustomConfig();
+
+// If user supplies their own project ID, standard Firebase uses '(default)' database
+const customProjectId = customStored.projectId || env.VITE_FIREBASE_PROJECT_ID;
 const isCustomProject = Boolean(
-  env.VITE_FIREBASE_PROJECT_ID && env.VITE_FIREBASE_PROJECT_ID !== defaultFirebaseConfig.projectId
+  customProjectId && customProjectId !== defaultFirebaseConfig.projectId
 );
 
 const resolvedDatabaseId =
+  customStored.firestoreDatabaseId ||
   env.VITE_FIREBASE_DATABASE_ID ||
   (isCustomProject ? '(default)' : defaultFirebaseConfig.firestoreDatabaseId || '(default)');
 
-const firebaseConfig = {
-  projectId: env.VITE_FIREBASE_PROJECT_ID || defaultFirebaseConfig.projectId,
-  appId: env.VITE_FIREBASE_APP_ID || defaultFirebaseConfig.appId,
-  apiKey: env.VITE_FIREBASE_API_KEY || defaultFirebaseConfig.apiKey,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || defaultFirebaseConfig.authDomain,
+export const firebaseConfig = {
+  projectId: customStored.projectId || env.VITE_FIREBASE_PROJECT_ID || defaultFirebaseConfig.projectId,
+  appId: customStored.appId || env.VITE_FIREBASE_APP_ID || defaultFirebaseConfig.appId,
+  apiKey: customStored.apiKey || env.VITE_FIREBASE_API_KEY || defaultFirebaseConfig.apiKey,
+  authDomain: customStored.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || defaultFirebaseConfig.authDomain,
   firestoreDatabaseId: resolvedDatabaseId,
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || defaultFirebaseConfig.storageBucket,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultFirebaseConfig.messagingSenderId,
+  storageBucket: customStored.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || defaultFirebaseConfig.storageBucket,
+  messagingSenderId: customStored.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultFirebaseConfig.messagingSenderId,
 };
+
+export function isUsingCustomFirebaseConfig(): boolean {
+  return Boolean(customStored.projectId || env.VITE_FIREBASE_PROJECT_ID);
+}
+
+export function saveCustomFirebaseConfig(cfg: {
+  apiKey?: string;
+  authDomain?: string;
+  projectId?: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  firestoreDatabaseId?: string;
+}) {
+  try {
+    localStorage.setItem('refound_custom_firebase_config', JSON.stringify(cfg));
+    window.location.reload();
+  } catch (err) {
+    console.warn('Failed to persist custom Firebase config:', err);
+  }
+}
+
+export function clearCustomFirebaseConfig() {
+  try {
+    localStorage.removeItem('refound_custom_firebase_config');
+    window.location.reload();
+  } catch (err) {
+    console.warn('Failed to clear custom Firebase config:', err);
+  }
+}
 
 // Configure log level to prevent verbose WebChannel connection retries in iframe sandboxes
 setLogLevel('error');

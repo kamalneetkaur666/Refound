@@ -15,6 +15,8 @@ import { NotificationsDrawer } from './components/NotificationsDrawer';
 import { ProfileModal } from './components/ProfileModal';
 import { AuthModal } from './components/AuthModal';
 import { FlagModal } from './components/FlagModal';
+import { FirebaseConfigModal } from './components/FirebaseConfigModal';
+import { isUsingCustomFirebaseConfig } from './firebase/config';
 import {
   Compass,
   ShieldCheck,
@@ -22,6 +24,7 @@ import {
   ExternalLink,
   Sparkles,
   MapPin,
+  Database,
 } from 'lucide-react';
 
 function AppContent() {
@@ -48,6 +51,7 @@ function AppContent() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isFirebaseModalOpen, setIsFirebaseModalOpen] = useState(false);
   const [flagModalItemId, setFlagModalItemId] = useState<string | null>(null);
 
   // Sync state from dataService
@@ -202,7 +206,16 @@ function AppContent() {
 
           <div className="pt-8 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-4">
             <p>&copy; 2026 ReFound Campus Network. Designed for university communities.</p>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setIsFirebaseModalOpen(true)}
+                className="flex items-center gap-1 text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
+                title="Configure Firebase Project"
+              >
+                <Database className="w-3.5 h-3.5 text-amber-500" />
+                <span>{isUsingCustomFirebaseConfig() ? 'Custom Firebase' : 'Firebase Ready'}</span>
+              </button>
               <span className="flex items-center gap-1 text-slate-500">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
                 Verified Campus Safe
@@ -299,12 +312,20 @@ function AppContent() {
           setIsProfileModalOpen(false);
           setIsAuthModalOpen(true);
         }}
+        onOpenFirebaseConfig={() => {
+          setIsProfileModalOpen(false);
+          setIsFirebaseModalOpen(true);
+        }}
       />
 
       {/* 7. Auth Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        onOpenFirebaseConfig={() => {
+          setIsAuthModalOpen(false);
+          setIsFirebaseModalOpen(true);
+        }}
       />
 
       {/* 8. Flag Modal */}
@@ -312,6 +333,12 @@ function AppContent() {
         itemId={flagModalItemId}
         isOpen={Boolean(flagModalItemId)}
         onClose={() => setFlagModalItemId(null)}
+      />
+
+      {/* 9. Firebase Project Config Modal */}
+      <FirebaseConfigModal
+        isOpen={isFirebaseModalOpen}
+        onClose={() => setIsFirebaseModalOpen(false)}
       />
     </div>
   );

@@ -21,12 +21,14 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialMode?: 'signin' | 'signup';
+  onOpenFirebaseConfig?: () => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   initialMode = 'signin',
+  onOpenFirebaseConfig,
 }) => {
   const {
     user,
@@ -248,25 +250,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="p-6 space-y-5">
           {/* Error Message */}
           {errorDetails && (
-            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-2">
+            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-2.5">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
-                <div className="space-y-1.5 leading-relaxed">
+                <div className="space-y-2 leading-relaxed flex-1">
                   <div>{errorDetails.message}</div>
-                  {errorDetails.code === 'auth/unauthorized-domain' && (
-                    <div className="pt-1 flex flex-wrap gap-2">
+                  <div className="pt-1 flex flex-wrap gap-2 items-center">
+                    <button
+                      type="button"
+                      onClick={() => handleDemoFallback()}
+                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors text-[11px] shadow-2xs cursor-pointer"
+                    >
+                      Instant Campus Bypass (1-Click)
+                    </button>
+                    {onOpenFirebaseConfig && (
                       <button
                         type="button"
                         onClick={() => {
-                          setMode('signin');
-                          setErrorDetails(null);
+                          onClose();
+                          onOpenFirebaseConfig();
                         }}
-                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors text-[11px]"
+                        className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold rounded-lg transition-colors text-[11px] cursor-pointer"
                       >
-                        Sign in with Campus Email instead
+                        Firebase Project Settings
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -487,6 +496,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <span>Sign In with Email</span>
                 )}
               </button>
+              {emailLoading && (
+                <button
+                  type="button"
+                  onClick={() => setEmailLoading(false)}
+                  className="text-center text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer w-full block py-1"
+                >
+                  Cancel &amp; Reset
+                </button>
+              )}
             </form>
           )}
 
@@ -500,42 +518,53 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {/* Google Sign In Button */}
-              <button
-                type="button"
-                id="google-signin-btn"
-                onClick={handleGoogleSignIn}
-                disabled={googleLoading || emailLoading}
-                className="w-full py-2.5 px-4 border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 text-slate-700 text-xs sm:text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2.5 shadow-2xs cursor-pointer disabled:cursor-not-allowed"
-              >
-                {googleLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0 text-indigo-600" />
-                    <span>Connecting with Google...</span>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.94 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-                      />
-                    </svg>
-                    <span>Continue with Google</span>
-                  </>
+              <div>
+                <button
+                  type="button"
+                  id="google-signin-btn"
+                  onClick={handleGoogleSignIn}
+                  disabled={googleLoading || emailLoading}
+                  className="w-full py-2.5 px-4 border border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 text-slate-700 text-xs sm:text-sm font-semibold rounded-xl transition-colors flex items-center justify-center gap-2.5 shadow-2xs cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {googleLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0 text-indigo-600" />
+                      <span>Connecting with Google...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" viewBox="0 0 24 24">
+                        <path
+                          fill="#4285F4"
+                          d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+                        />
+                        <path
+                          fill="#34A853"
+                          d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
+                        />
+                        <path
+                          fill="#FBBC05"
+                          d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.94 0 12s.45 3.84 1.25 5.42l4.03-3.15z"
+                        />
+                        <path
+                          fill="#EA4335"
+                          d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+                        />
+                      </svg>
+                      <span>Continue with Google</span>
+                    </>
+                  )}
+                </button>
+                {googleLoading && (
+                  <button
+                    type="button"
+                    onClick={() => setGoogleLoading(false)}
+                    className="text-center text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer w-full block py-1 mt-1"
+                  >
+                    Cancel &amp; Reset
+                  </button>
                 )}
-              </button>
+              </div>
 
               {/* Quick Demo Personas Box */}
               <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-2xl space-y-2">
@@ -573,6 +602,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {onOpenFirebaseConfig && (
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenFirebaseConfig();
+                    }}
+                    className="text-[11px] text-slate-500 hover:text-indigo-600 underline font-medium transition-colors cursor-pointer"
+                  >
+                    Using a new Firebase project? Configure connection settings
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

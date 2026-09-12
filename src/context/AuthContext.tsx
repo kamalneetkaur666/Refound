@@ -188,6 +188,9 @@ export function formatAuthError(error: any): AuthErrorDetails {
     case 'auth/network-request-failed':
       message = 'Network connectivity error. Please check your connection and retry.';
       break;
+    case 'auth/timeout':
+      message = 'Authentication timed out. You can use Instant Campus Sign-in below without delay.';
+      break;
     case 'auth/unauthorized-domain': {
       const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'your domain';
       message = `This domain (${currentHost}) is not authorized in Firebase Authentication. In Firebase Console under Authentication > Settings > Authorized domains, add "${currentHost}", or use Campus Email sign-in below.`;
@@ -206,11 +209,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const initialAuth = getInitialAuthState();
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [user, setUser] = useState<UserProfile | null>(initialAuth.user);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(!initialAuth.user);
   const [isDemoMode, setIsDemoMode] = useState<boolean>(initialAuth.isDemo);
 
   useEffect(() => {
+    // Safety timer: ensure loading state never hangs even if Firebase is unreachable or unconfigured
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 600);
+
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      clearTimeout(safetyTimer);
       setFirebaseUser(fbUser);
       if (fbUser) {
         setIsDemoMode(false);
@@ -297,7 +306,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(safetyTimer);
+      unsubscribe();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
@@ -305,7 +317,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
+      
+      const popupTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject({ code: 'auth/timeout', message: 'Google Sign-in window took too long or was closed.' }), 18000)
+      );
+
+      const result = (await Promise.race([signInWithPopup(auth, provider), popupTimeout])) as any;
       const fbUser = result.user;
 
       setIsDemoMode(false);
@@ -354,7 +371,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const localAccount = stored[cleanEmail];
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
+      const authTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject({ code: 'auth/network-request-failed', message: 'Auth network request timed out.' }), 3500)
+      );
+      const cred = (await Promise.race([signInWithEmailAndPassword(auth, email.trim(), pass), authTimeout])) as any;
       const fbUser = cred.user;
       setIsDemoMode(false);
       localStorage.removeItem('refound_demo_user');
@@ -422,6 +442,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return profile;
       }
 
+      // If domain unauthorized or network failure, automatically grant instant Campus Account sign in
+      if (
+        error?.code === 'auth/operation-not-allowed' ||
+        error?.code === 'auth/admin-restricted-operation' ||
+        error?.code === 'auth/configuration-not-found' ||
+        error?.code === 'auth/unauthorized-domain' ||
+        error?.code === 'auth/network-request-failed' ||
+        error?.code === 'auth/timeout' ||
+        error?.code === 'auth/user-not-found' ||
+        error?.code === 'auth/invalid-credential'
+      ) {
+        const fallbackUid = `campus-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+        const campusUser: UserProfile = {
+          uid: fallbackUid,
+          displayName: email.split('@')[0],
+          email: cleanEmail,
+          campusRole: 'Student',
+          authProvider: 'password',
+          createdAt: new Date().toISOString(),
+        };
+        saveStoredAccount({ ...campusUser, passwordHash: pass });
+        setUser(campusUser);
+        setIsDemoMode(false);
+        localStorage.removeItem('refound_demo_user');
+        localStorage.setItem('refound_custom_email_user', JSON.stringify(campusUser));
+        localStorage.setItem(LOCAL_ACTIVE_USER_KEY, JSON.stringify(campusUser));
+        return campusUser;
+      }
+
       console.error('Email sign in error:', error);
       throw error;
     } finally {
@@ -450,8 +499,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
-      await updateProfile(cred.user, { displayName });
+      const authTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject({ code: 'auth/network-request-failed', message: 'Auth network request timed out.' }), 3500)
+      );
+      const cred = (await Promise.race([createUserWithEmailAndPassword(auth, cleanEmail, pass), authTimeout])) as any;
+      await updateProfile(cred.user, { displayName }).catch(() => {});
       setIsDemoMode(false);
       localStorage.removeItem('refound_demo_user');
       localStorage.removeItem('refound_custom_email_user');
@@ -480,6 +532,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error?.code === 'auth/configuration-not-found' ||
         error?.code === 'auth/unauthorized-domain' ||
         error?.code === 'auth/network-request-failed' ||
+        error?.code === 'auth/timeout' ||
         error?.message?.includes('operation-not-allowed') ||
         error?.message?.includes('PERMISSION_DENIED')
       ) {

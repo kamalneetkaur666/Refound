@@ -44,6 +44,14 @@ function setLocal<T>(key: string, data: T[]) {
   }
 }
 
+// Resilient non-blocking write helper so slow/offline networks or unconfigured Firebase never hang the UI
+function safeFirestoreWrite<T>(promise: Promise<T>, timeoutMs = 1200): Promise<void> {
+  const timeoutPromise = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+  return Promise.race([promise.then(() => {}), timeoutPromise]).catch((err) => {
+    console.warn('Firestore background write warning (local state preserved):', err?.message || err);
+  });
+}
+
 class DataService {
   private items: ItemReport[] = getLocal<ItemReport>(LOCAL_STORAGE_KEY_ITEMS, SAMPLE_ITEMS);
   private matches: PotentialMatch[] = getLocal<PotentialMatch>(LOCAL_STORAGE_KEY_MATCHES, SAMPLE_MATCHES);
@@ -206,7 +214,7 @@ class DataService {
     setLocal(LOCAL_STORAGE_KEY_ITEMS, this.items);
     this.notify();
 
-    // Persist to Firestore
+    // Persist to Firestore in background without blocking UI
     try {
       const docPayload: any = {
         ...newItem,
@@ -215,18 +223,20 @@ class DataService {
       if (!docPayload.imageUrl) {
         delete docPayload.imageUrl;
       }
-      await setDoc(doc(db, 'items', id), docPayload);
+      safeFirestoreWrite(setDoc(doc(db, 'items', id), docPayload));
 
       if (privateDetails) {
-        await setDoc(doc(db, 'items', id, 'private', 'details'), {
-          itemId: id,
-          ownerId: newItem.ownerId,
-          privateDetails,
-          updatedAt: now,
-        });
+        safeFirestoreWrite(
+          setDoc(doc(db, 'items', id, 'private', 'details'), {
+            itemId: id,
+            ownerId: newItem.ownerId,
+            privateDetails,
+            updatedAt: now,
+          })
+        );
       }
     } catch (error) {
-      console.warn('Firestore item write error:', error);
+      console.warn('Firestore item write note:', error);
     }
 
     return newItem;
@@ -255,7 +265,7 @@ class DataService {
       } else if (updates.imageUrl === undefined) {
         delete firestoreUpdates.imageUrl;
       }
-      await updateDoc(doc(db, 'items', id), firestoreUpdates);
+      safeFirestoreWrite(updateDoc(doc(db, 'items', id), firestoreUpdates));
     } catch (error) {
       console.warn('Firestore item update error:', error);
     }
@@ -272,7 +282,7 @@ class DataService {
     this.notify();
 
     try {
-      await deleteDoc(doc(db, 'items', id));
+      safeFirestoreWrite(deleteDoc(doc(db, 'items', id)));
     } catch (error) {
       console.warn('Firestore delete error:', error);
     }
@@ -374,7 +384,7 @@ class DataService {
     }
 
     try {
-      await setDoc(doc(db, 'matches', id), newMatch);
+      safeFirestoreWrite(setDoc(doc(db, 'matches', id), newMatch));
     } catch (err) {
       console.warn('Firestore match save note:', err);
     }
@@ -389,7 +399,7 @@ class DataService {
     this.notify();
 
     try {
-      await updateDoc(doc(db, 'matches', matchId), { status: 'dismissed' });
+      safeFirestoreWrite(updateDoc(doc(db, 'matches', matchId), { status: 'dismissed' }));
     } catch (err) {
       console.warn('Firestore dismiss match note:', err);
     }
@@ -432,7 +442,7 @@ class DataService {
     });
 
     try {
-      await setDoc(doc(db, 'claims', id), newClaim);
+      safeFirestoreWrite(setDoc(doc(db, 'claims', id), newClaim));
     } catch (err) {
       console.warn('Firestore claim write note:', err);
     }
@@ -480,11 +490,13 @@ class DataService {
     });
 
     try {
-      await updateDoc(doc(db, 'claims', claimId), {
-        status,
-        updatedAt: now,
-        rejectionReason: rejectionReason || null,
-      });
+      safeFirestoreWrite(
+        updateDoc(doc(db, 'claims', claimId), {
+          status,
+          updatedAt: now,
+          rejectionReason: rejectionReason || null,
+        })
+      );
     } catch (err) {
       console.warn('Firestore claim update note:', err);
     }
@@ -514,7 +526,7 @@ class DataService {
     setLocal(LOCAL_STORAGE_KEY_NOTIFS, this.notifications);
 
     try {
-      await setDoc(doc(db, 'notifications', id), newNotif);
+      safeFirestoreWrite(setDoc(doc(db, 'notifications', id), newNotif));
     } catch (err) {
       console.warn('Firestore notification note:', err);
     }
@@ -529,7 +541,7 @@ class DataService {
     this.notify();
 
     try {
-      await updateDoc(doc(db, 'notifications', id), { isRead: true });
+      safeFirestoreWrite(updateDoc(doc(db, 'notifications', id), { isRead: true }));
     } catch (err) {
       console.warn('Firestore mark read note:', err);
     }
@@ -557,7 +569,7 @@ class DataService {
     setLocal(LOCAL_STORAGE_KEY_FLAGS, this.flags);
 
     try {
-      await setDoc(doc(db, 'flags', id), newFlag);
+      safeFirestoreWrite(setDoc(doc(db, 'flags', id), newFlag));
     } catch (err) {
       console.warn('Firestore flag note:', err);
     }
